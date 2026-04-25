@@ -1,0 +1,93 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# LIGHTWEIGHT DEVELOPMENT ONLY - Minimal resource usage, won't crash your Mac
+# Usage: docker-compose -f docker-compose.dev.yml up
+# ══════════════════════════════════════════════════════════════════════════════
+
+version: "3.9"
+
+networks:
+  providius:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  prometheus_data:
+
+services:
+  # ── PostgreSQL (LEAN) ──────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine  # Smallest official image
+    container_name: providius_postgres_dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: integrateai
+      POSTGRES_PASSWORD: integrateai_secret
+      POSTGRES_DB: integrateai_db
+      POSTGRES_INITDB_ARGS: "-c max_connections=20 -c shared_buffers=128MB"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U integrateai"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'        # ⚡ Use only 0.5 CPU (1/4 of default)
+          memory: 200M       # ⚡ 200MB only (was 512MB)
+        reservations:
+          cpus: '0.25'
+          memory: 100M
+    networks:
+      - providius
+
+  # ── FastAPI (LEAN) ────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: development
+    container_name: providius_app_dev
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://integrateai:integrateai_secret@postgres:5432/integrateai_db
+      ENVIRONMENT: development
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app  # Code hot-reload
+    networks:
+      - providius
+    deploy:
+      resources:
+        limits:
+          cpus: '1'          # ⚡ Use only 1 CPU (was 2)
+          memory: 512M       # ⚡ 512MB max (was 1GB) — FastAPI is lean
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 2
+    # No Prometheus/Grafana in dev — they're heavy
+
+  # ── Redis Cache (OPTIONAL - for sessions, very lightweight)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: providius_redis_dev
+  #   ports:
+  #     - "6379:6379"
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 64M

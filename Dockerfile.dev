@@ -1,0 +1,31 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# LEAN DEVELOPMENT DOCKERFILE - Minimal memory footprint
+# ══════════════════════════════════════════════════════════════════════════════
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install only essential system packages (no extras)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements (pinned versions for consistency)
+COPY pyproject.toml ./
+
+# Install Python dependencies with minimal caching
+RUN pip install --no-cache-dir -e . 2>&1 | grep -v "already satisfied" || true
+
+# Copy app code
+COPY app ./app
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# No entrypoint — let Docker Compose run it directly with uvicorn
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--workers", "1"]

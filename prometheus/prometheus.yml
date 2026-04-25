@@ -1,0 +1,22 @@
+# prometheus/prometheus.yml
+# Scrape configuration for IntegrateAI Blueprint
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    service: integrateai-blueprint
+    environment: production
+
+scrape_configs:
+  # FastAPI app metrics (exposed by prometheus-fastapi-instrumentator)
+  - job_name: integrateai_app
+    static_configs:
+      - targets: ["app:8000"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # Prometheus self-monitoring
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

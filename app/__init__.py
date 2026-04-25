@@ -1,0 +1,1 @@
+"""IntegrateAI Blueprint application package."""

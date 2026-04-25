@@ -1,0 +1,53 @@
+# docker-compose.override.yml
+# Local development overrides - use with: docker compose up
+# Uncomment services you DON'T need to reduce resource usage
+
+version: "3.9"
+
+services:
+  # Development database with less memory restriction
+  postgres:
+    environment:
+      # More permissive for development
+      POSTGRES_INITDB_ARGS: "-c max_connections=100 -c shared_buffers=512MB"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  # Development app with hot reload
+  app:
+    environment:
+      ENVIRONMENT: development
+      DEBUG: "true"
+    volumes:
+      - ./app:/app/app  # Enable hot reload
+    # Increased memory for development debugging
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 2G
+        reservations:
+          cpus: '2'
+          memory: 1G
+
+  # Optional: comment out Prometheus to save ~100MB
+  # prometheus:
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '0'
+  #         memory: '0'
+
+  # Optional: comment out Grafana to save ~100MB
+  # grafana:
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '0'
+  #         memory: '0'
