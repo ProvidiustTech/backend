@@ -92,13 +92,13 @@ ps:
 
 health:
 	@echo "Checking service health..."
-	@curl -f http://localhost:8000/health && echo "✓ Backend OK" || echo "✗ Backend DOWN"
-	@docker compose logs postgres | tail -5
+	@curl -f http://localhost:8000/api/v1/health && echo "✓ Backend OK" || echo "✗ Backend DOWN"
+	@docker compose logs postgres 2>/dev/null | tail -5 || echo "Note: Postgres container logs unavailable (running locally?)"
 
 # ── Testing ────────────────────────────────────────────────────────────────
 
 test:
-	pytest evals/ -v --cov=app --cov-report=term-missing
+	PYTHONPATH=. ./.venv/bin/pytest evals/ -v --cov=app --cov-report=term-missing
 
 eval:
 	pytest evals/ -v -k "not Latency" --tb=short

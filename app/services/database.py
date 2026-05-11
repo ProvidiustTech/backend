@@ -112,7 +112,7 @@ async def init_db() -> None:
         log.info("pgvector extension ready")
 
         # Import models so their metadata is registered with Base
-        from app.models import collection, document, user  # noqa: F401
+        from app.models import collection, document, user, cs, social  # noqa: F401
 
         # In development, auto-create tables. In production, run: make migrate
         if settings.ENVIRONMENT == "development":
@@ -134,7 +134,10 @@ async def check_db_health() -> dict:
     import time
 
     start = time.perf_counter()
-    async with AsyncSessionLocal() as session:
-        await session.execute(text("SELECT 1"))
-    latency_ms = round((time.perf_counter() - start) * 1000, 2)
-    return {"status": "ok", "latency_ms": latency_ms}
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        latency_ms = round((time.perf_counter() - start) * 1000, 2)
+        return {"status": "ok", "latency_ms": latency_ms}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

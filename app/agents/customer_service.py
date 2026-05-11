@@ -64,6 +64,7 @@ class CSAgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
     # ── Context assembly ───────────────────────────────────────────────────────
+    training_data: str               # custom text from onboarding
     scraped_context: str             # from web scrape (primary source)
     scraped_pages: list[dict]        # metadata about which pages were scraped
     resolved_cases: list[dict]       # similar past cases
@@ -226,6 +227,11 @@ async def build_context_node(state: CSAgentState) -> dict:
     """
     t0 = time.perf_counter()
     parts: list[str] = []
+
+    # Custom Training Data (highest priority for specific instructions/facts)
+    training = state.get("training_data", "")
+    if training:
+        parts.append(f"## Custom Company Knowledge (Manual Upload)\n\n{training[:4000]}")
 
     # Primary: web scrape
     scraped = state.get("scraped_context", "")

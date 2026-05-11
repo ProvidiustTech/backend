@@ -82,6 +82,7 @@ async def create_collection(
     db.add(collection)
     await db.flush()
     await db.refresh(collection)
+    await db.commit()
 
     log.info("collection created", id=str(collection.id), name=collection.name)
 
@@ -137,6 +138,7 @@ async def delete_collection(
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
     await db.delete(collection)
+    await db.commit()
     log.info("collection deleted", id=str(collection_id))
 
 
@@ -240,6 +242,7 @@ async def upload_document(
     )
     db.add(doc)
     await db.flush()
+    await db.commit()
 
     # Update collection document count
     coll_result2 = await db.execute(select(Collection).where(Collection.id == collection_id))
@@ -313,6 +316,7 @@ async def delete_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     await db.delete(doc)
+    await db.commit()
     log.info("document deleted", doc_id=str(document_id))
 
 

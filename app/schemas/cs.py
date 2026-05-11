@@ -21,6 +21,23 @@ class CompanyRegisterRequest(BaseModel):
         default=None,
         description="finance | healthcare | retail | manufacturing | logistics | other",
     )
+    team_size: str | None = Field(
+        default=None,
+        description="Range of employees, e.g., '1-10', '11-50'",
+    )
+    monthly_volume: str | None = Field(
+        default=None,
+        description="Expected monthly support tickets, e.g., '0-100', '100-500'",
+    )
+    channels: list[str] = Field(
+        default_factory=list,
+        description="List of selected support channels, e.g., ['web', 'whatsapp', 'email']",
+    )
+    training_data: str | None = Field(
+        default=None,
+        max_length=10000,
+        description="Custom training text provided during onboarding to ground the agent.",
+    )
     agent_name: str = Field(
         default="Support Agent",
         description="Name the AI agent uses when greeting customers",

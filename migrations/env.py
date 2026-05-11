@@ -1,5 +1,3 @@
-"""Alembic migration environment."""
-
 import asyncio
 import os
 from logging.config import fileConfig
@@ -8,17 +6,27 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+from dotenv import load_dotenv
 
-# Import all models so Alembic sees them
-from app.models import user, collection, document  # noqa
-from app.services.database import Base
+# 1. Load environment variables first
+load_dotenv(override=True)
 
+# 2. Define the config object IMMEDIATELY after imports
 config = context.config
-config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
 
+# 3. Now you can safely use it
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url)
+
+# 4. Import models and metadata
+from app.models import user, collection, document, cs, social  # noqa
+from app.services.database import Base
+target_metadata = Base.metadata
+
+# Set up logging
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-
 target_metadata = Base.metadata
 
 

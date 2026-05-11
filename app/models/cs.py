@@ -34,6 +34,10 @@ class CompanyRegistration(Base):
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     industry: Mapped[str | None] = mapped_column(String(64))  # finance | healthcare | retail | ...
+    team_size: Mapped[str | None] = mapped_column(String(32))
+    monthly_volume: Mapped[str | None] = mapped_column(String(32))
+    channels: Mapped[list] = mapped_column(JSONB, default=list)
+    training_data: Mapped[str | None] = mapped_column(Text)
     extra_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
     # Scraped knowledge — cached here, refreshed on demand

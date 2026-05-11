@@ -32,9 +32,9 @@ Health:
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, AsyncGenerator
+from typing import Annotated, AsyncGenerator, List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status, Form, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,6 +77,7 @@ from app.services.database import get_db
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/agents", tags=["AI Agents"])
+onboarding_router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -123,6 +124,10 @@ async def cs_register(
         name=request.company_name,
         url=request.company_url,
         industry=request.industry,
+        team_size=request.team_size,
+        monthly_volume=request.monthly_volume,
+        channels=request.channels,
+        training_data=request.training_data,
         agent_name=request.agent_name,
         escalation_email=request.escalation_email,
         system_prompt_override=request.system_prompt_override,
@@ -149,6 +154,71 @@ async def cs_register(
             f"Company registered. Scraping {request.company_url} in the background. "
             f"Check GET /api/v1/agents/cs/companies/{company_id} for scrape status."
         ),
+    )
+
+
+@onboarding_router.post(
+    "/setup",
+    response_model=CompanyRegisterResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Onboarding setup alias for company registration",
+)
+async def onboarding_setup(
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+    industry: str = Form(""),
+    teamSize: str = Form(""),
+    monthlyVolume: str = Form(""),
+    channels: str = Form("[]"),
+    urls: str = Form("[]"),
+    files: List[UploadFile] = File(None),
+) -> CompanyRegisterResponse:
+    """
+    Alias for cs_register to match frontend onboarding flow.
+    Handles Industry, Team Size, Monthly Volume, and Channels.
+    """
+    # Parse JSON strings from form fields
+    try:
+        channels_list = json.loads(channels)
+        urls_list = json.loads(urls)
+    except Exception:
+        channels_list = []
+        urls_list = []
+
+    # Use first URL as company URL if available, otherwise fallback
+    company_url = urls_list[0] if urls_list else "https://providius.ai/pending-setup"
+
+    from app.models.cs import CompanyRegistration
+    
+    company = CompanyRegistration(
+        owner_id=current_user.id,
+        name=current_user.full_name, # Use user's company name from registration
+        url=company_url,
+        industry=industry,
+        team_size=teamSize,
+        monthly_volume=monthlyVolume,
+        channels=channels_list,
+        training_data=f"Imported URLs: {', '.join(urls_list)}",
+        scrape_status="pending",
+    )
+    db.add(company)
+    await db.flush()
+    company_id = company.id
+    await db.commit()
+
+    log.info("onboarding setup complete", company_id=str(company_id))
+
+    if urls_list:
+        background_tasks.add_task(_background_scrape, str(company_id), company_url)
+
+    return CompanyRegisterResponse(
+        company_id=company_id,
+        company_name=company.name,
+        scrape_status="pending",
+        pages_scraped=[],
+        context_chars=0,
+        message="Onboarding setup successful.",
     )
 
 
@@ -386,6 +456,7 @@ async def cs_chat(
         "messages": [],
         # Pre-populate from DB cache
         "scraped_context": company.scraped_context or "",
+        "training_data": company.training_data or "",
         "scraped_pages": company.pages_scraped or [],
         "resolved_cases": [],
         "rag_chunks": [],
@@ -552,6 +623,7 @@ async def _stream_cs_chat(
         "chat_history": chat_history,
         "messages": [],
         "scraped_context": company.scraped_context or "",
+        "training_data": company.training_data or "",
         "scraped_pages": company.pages_scraped or [],
         "resolved_cases": [],
         "rag_chunks": [],

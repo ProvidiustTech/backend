@@ -15,7 +15,7 @@ from typing import Annotated
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.metrics import auth_attempts_total
 from app.models.user import User
-from app.schemas.auth import Token, TokenData, UserCreate
+from app.schemas.auth import Token, TokenData, UserCreate, UserLogin
 from app.services.database import get_db
 
 log = get_logger(__name__)
@@ -113,10 +113,12 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> T
     user = User(
         email=payload.email,
         hashed_password=hash_password(payload.password),
-        full_name=payload.full_name,
+        full_name=payload.company,
     )
     db.add(user)
-    await db.flush()
+    await db.flush()  
+    # Ensure the transaction is committed so the user actually exists in the DB
+    await db.refresh(user) # Syncs state back from DB
     token_data = {"sub": str(user.id), "email": user.email}
     log.info("user registered", user_id=str(user.id))
     auth_attempts_total.labels(endpoint="register", status="success").inc()
@@ -124,17 +126,18 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> T
         access_token=create_access_token(token_data),
         refresh_token=create_refresh_token(token_data),
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        full_name=user.full_name, # Include the user's full_name (company name)
     )
 
 
 @router.post("/login", response_model=Token)
 async def login(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    payload: UserLogin,
     db: AsyncSession = Depends(get_db),
 ) -> Token:
-    result = await db.execute(select(User).where(User.email == form_data.username))
+    result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user or not verify_password(payload.password, user.hashed_password):
         auth_attempts_total.labels(endpoint="login", status="failure").inc()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Incorrect email or password")
@@ -145,6 +148,7 @@ async def login(
         access_token=create_access_token(token_data),
         refresh_token=create_refresh_token(token_data),
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        full_name=user.full_name, # Include the user's full_name (company name)
     )
 
 
@@ -176,6 +180,6 @@ async def get_me(current_user: Annotated[User, Depends(get_current_user)]) -> di
     return {
         "id": str(current_user.id),
         "email": current_user.email,
-        "full_name": current_user.full_name,
+        "company": current_user.full_name,
         "is_active": current_user.is_active,
     }

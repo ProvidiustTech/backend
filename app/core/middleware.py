@@ -18,6 +18,7 @@ import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
@@ -74,6 +75,35 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     )
 
 
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """
+    Handle 422 errors by logging the specific validation failures.
+    Helps debug mismatches between frontend keys (like 'company') and backend schemas.
+    """
+    errors = exc.errors()
+    # This will print the exact reason for the 422 in your terminal
+    log.error("validation_failed", errors=errors)
+
+    # Ensure all parts of the error are JSON serializable.
+    # Pydantic's error dicts may contain 'input' which can be binary/bytes or objects.
+    serializable_errors = []
+    for error in errors:
+        clean_error = dict(error)
+        # Remove raw input which might be non-serializable bytes or UploadFile
+        clean_error.pop("input", None)
+        # Convert tuple 'loc' to list for JSON serialization
+        clean_error["loc"] = list(clean_error["loc"])
+        serializable_errors.append(clean_error)
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": serializable_errors,
+            "message": "Validation failed. Check backend logs for details.",
+        },
+    )
+
+
 def register_middleware(app: FastAPI) -> None:
     """
     Called once from main.py to attach all middleware to the FastAPI app.
@@ -95,3 +125,4 @@ def register_middleware(app: FastAPI) -> None:
 
     # 3. Global exception handler
     app.add_exception_handler(Exception, global_exception_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)

@@ -98,6 +98,7 @@ def create_app() -> FastAPI:
     # Routers — CS agent endpoints come first in docs
     app.include_router(auth.router,          prefix="/api/v1")
     app.include_router(agents_router.router, prefix="/api/v1")  # primary
+    app.include_router(agents_router.onboarding_router, prefix="/api/v1")
     app.include_router(chatbot.router,       prefix="/api/v1")
     app.include_router(endpoints.router,     prefix="/api/v1")
     app.include_router(frontend_router.router)  # must be last
