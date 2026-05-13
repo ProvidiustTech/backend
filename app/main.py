@@ -27,6 +27,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import auth, chatbot, endpoints
 from app.api.v1 import agents as agents_router
@@ -36,19 +37,45 @@ from app.core.logging import get_logger, setup_logging
 from app.core.middleware import register_middleware
 from app.services.database import close_db, init_db, engine, Base
 
+
+import os
+from dotenv import load_dotenv
+
+# Load environment variables BEFORE any routers
+load_dotenv(override=True)
+print("✅ .env loaded. TELEGRAM_BOT_TOKEN present:", bool(os.getenv("TELEGRAM_BOT_TOKEN")))
+
+
+# Telegram Router (local)
+from app.routers.telegram import router as telegram_router
+
+
+
 log = get_logger(__name__)
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
-limiter = Limiter(key_func=get_remote_address,
-                  default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"])
 
+# Limiter is created once at module level — that's fine, it's not bound to an app instance
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"],
+)
+
+
+# ---------------------------------------------------------------------------
+# Lifespan
+# ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    log.info("starting Providius", version=settings.APP_VERSION,
-             environment=settings.ENVIRONMENT, llm=settings.LLM_PROVIDER)
+    log.info(
+        "starting Providius",
+        version=settings.APP_VERSION,
+        environment=settings.ENVIRONMENT,
+        llm=settings.LLM_PROVIDER,
+    )
 
-    # Register all models before creating tables
+    # Import every ORM model before create_all so SQLAlchemy sees the metadata
     from app.models import (  # noqa: F401
         User, Collection, Document, DocumentChunk,
         SocialProfile, SocialPost, SocialSchedule,
@@ -57,7 +84,6 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
-    # Create any new tables added since last run
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -66,6 +92,10 @@ async def lifespan(app: FastAPI):
     log.info("shutting down Providius")
     await close_db()
 
+
+# ---------------------------------------------------------------------------
+# App factory
+# ---------------------------------------------------------------------------
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -83,11 +113,29 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # ------------------------------------------------------------------
+    # CORS — must be registered before any other middleware so it runs last
+    # in the ASGI stack (outermost wrapper = first to handle the request).
+    # ------------------------------------------------------------------
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:3000",                  # local dev
+            "https://dashboard.providiustech.com",   # production
+        ],
+        allow_credentials=True,   # Required for Set-Cookie to work cross-origin
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Rate limiting
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+    # Custom middleware (logging, request-id, etc.)
     register_middleware(app)
 
+    # Prometheus — exposed at /metrics
     if settings.PROMETHEUS_ENABLED:
         Instrumentator(
             should_group_status_codes=True,
@@ -95,28 +143,49 @@ def create_app() -> FastAPI:
             excluded_handlers=["/health", "/metrics", "/", "/sw.js", "/manifest.json"],
         ).instrument(app).expose(app, include_in_schema=False)
 
-    # Routers — CS agent endpoints come first in docs
-    app.include_router(auth.router,          prefix="/api/v1")
-    app.include_router(agents_router.router, prefix="/api/v1")  # primary
+    # ------------------------------------------------------------------
+    # Routers — order matters for OpenAPI display; CS agent comes first
+    # ------------------------------------------------------------------
+    app.include_router(auth.router,                   prefix="/api/v1")
+    app.include_router(telegram_router)   # ← ADD THIS LINE
+    app.include_router(agents_router.router,          prefix="/api/v1")
     app.include_router(agents_router.onboarding_router, prefix="/api/v1")
-    app.include_router(chatbot.router,       prefix="/api/v1")
-    app.include_router(endpoints.router,     prefix="/api/v1")
-    app.include_router(frontend_router.router)  # must be last
+    app.include_router(chatbot.router,                prefix="/api/v1")
+    app.include_router(endpoints.router,              prefix="/api/v1")
+    app.include_router(frontend_router.router)
 
+    # Static assets — only mount if the directory actually exists
     if (FRONTEND_DIR / "icons").exists():
-        app.mount("/icons", StaticFiles(directory=str(FRONTEND_DIR / "icons")), name="icons")
+        app.mount(
+            "/icons",
+            StaticFiles(directory=str(FRONTEND_DIR / "icons")),
+            name="icons",
+        )
 
     return app
 
 
+# ---------------------------------------------------------------------------
+# Module-level app instance (what uvicorn imports)
+# ---------------------------------------------------------------------------
+
 app = create_app()
 
+
+# ---------------------------------------------------------------------------
+# Custom OpenAPI schema — adds BearerAuth security scheme globally
+# ---------------------------------------------------------------------------
 
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
-    schema = get_openapi(title=app.title, version=app.version,
-                         description=app.description, routes=app.routes)
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
     schema.setdefault("components", {})
     schema["components"]["securitySchemes"] = {
         "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
@@ -124,6 +193,9 @@ def custom_openapi():
     schema["security"] = [{"BearerAuth": []}]
     app.openapi_schema = schema
     return schema
+
+
+
 
 
 app.openapi = custom_openapi

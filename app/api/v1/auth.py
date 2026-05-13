@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy import select
@@ -173,6 +173,21 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)) 
         refresh_token=create_refresh_token(token_data),
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
+
+@router.post("/logout")
+async def logout(response: Response):
+    """
+    The ONLY way to clear HttpOnly cookies is via a Set-Cookie header from the server.
+    """
+    cookies_to_clear = ["access_token", "refresh_token", "session_active"]
+    for cookie in cookies_to_clear:
+        response.delete_cookie(
+            key=cookie,
+            path="/",
+            httponly=True if cookie != "session_active" else False,
+            samesite="lax",
+        )
+    return {"detail": "Successfully logged out"}
 
 
 @router.get("/me")
